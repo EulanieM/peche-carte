@@ -696,7 +696,7 @@ button,a.btn{font:inherit;border:0;border-radius:10px;min-height:44px;font-weigh
   <div class="tgl"><button id="tSt" class="on">Station</button><button id="tTr">Point de transfert</button></div>
   <div class="xy" id="xy">Touche la carte pour placer le point</div>
   <div class="mute" id="ll">Ou « Me localiser » puis déplace le repère rouge.</div>
-  <div class="row" style="margin-top:6px"><a class="btn pri" id="send" href="#">Envoyer à l'appli</a><button id="copy">Copier X Y</button></div>
+  <div class="row" style="margin-top:6px"><a class="btn pri" id="send" href="#">Envoyer à l'appli</a><button id="copy">Copier X Y Z</button></div>
 </div>
 <div id="toast"></div>
 <script>/* @preserve
@@ -735,11 +735,25 @@ function show(){
     else mk[k].setLatLng([pts[k].lat,pts[k].lon]);mk[k].setOpacity(k===mode?1:0.45)}});
   if(!p){xy.textContent="Touche la carte pour placer le point";ll.textContent="Ou « Me localiser » puis déplace le repère rouge.";send.href="#";return}
   const [X,Y]=wgsToL93(p.lat,p.lon);
-  xy.textContent=`X ${X} · Y ${Y}`;
-  ll.textContent=`Lambert 93 · lat ${p.lat.toFixed(5)}, lon ${p.lon.toFixed(5)}${p.acc?` · GPS ±${Math.round(p.acc)} m`:""}`;
-  send.href=`${APP_URL}#xy-${mode}-${X}-${Y}`;
+  const Z=p.z!=null?Math.round(p.z):null;
+  xy.textContent=`X ${X} · Y ${Y}${Z!=null?` · Alt. ${Z} m`:""}`;
+  ll.textContent=`Lambert 93 · lat ${p.lat.toFixed(5)}, lon ${p.lon.toFixed(5)}${p.acc?` · GPS ±${Math.round(p.acc)} m`:""} · altitude : ${p.zSrc==="ign"?"IGN RGE ALTI":p.zSrc==="gps"?"GPS du téléphone (approximative)":p.zSrc==="wait"?"calcul…":"indisponible"}`;
+  send.href=`${APP_URL}#xy-${mode}-${X}-${Y}${Z!=null&&Z>=0?"-"+Z:""}`;
 }
-function setPt(k,lat,lon,acc){pts[k]={lat,lon,acc:acc||null};try{localStorage.setItem("carteL93",JSON.stringify(pts))}catch(e){}show()}
+/* altitude du terrain : service altimétrique IGN (RGE ALTI) ; à défaut, altitude GPS */
+let zReq=0;
+async function fetchAlt(k,gpsAlt){
+  const p=pts[k];const id=++zReq;p.zSrc="wait";show();
+  try{
+    const u=`https://data.geopf.fr/altimetrie/1.0/calcul/alti/rest/elevation.json?lon=${p.lon.toFixed(6)}&lat=${p.lat.toFixed(6)}&resource=ign_rge_alti_wld&zonly=true`;
+    const r=await fetch(u);if(!r.ok)throw 0;const j=await r.json();
+    const z=Array.isArray(j.elevations)?(typeof j.elevations[0]==="number"?j.elevations[0]:j.elevations[0]&&j.elevations[0].z):null;
+    if(id!==zReq||pts[k]!==p)return;
+    if(z==null||z<-100)throw 0;p.z=z;p.zSrc="ign";
+  }catch(e){if(id!==zReq||pts[k]!==p)return;if(gpsAlt!=null){p.z=gpsAlt;p.zSrc="gps"}else{p.z=null;p.zSrc="none"}}
+  try{localStorage.setItem("carteL93",JSON.stringify(pts))}catch(e){}show();
+}
+function setPt(k,lat,lon,acc,gpsAlt){pts[k]={lat,lon,acc:acc||null,z:null,zSrc:"wait"};try{localStorage.setItem("carteL93",JSON.stringify(pts))}catch(e){}show();fetchAlt(k,gpsAlt??null)}
 map.on("click",e=>setPt(mode,e.latlng.lat,e.latlng.lng));
 tSt.onclick=()=>{mode="st";tSt.classList.add("on");tTr.classList.remove("on");show()};
 tTr.onclick=()=>{mode="tr";tTr.classList.add("on");tSt.classList.remove("on");show()};
@@ -748,14 +762,14 @@ loc.onclick=()=>{
   if(!navigator.geolocation){toast("Géolocalisation indisponible");return}
   toast("Recherche de la position…");
   navigator.geolocation.getCurrentPosition(pos=>{
-    const {latitude:la,longitude:lo,accuracy:a}=pos.coords;
-    setPt(mode,la,lo,a);map.setView([la,lo],Math.max(map.getZoom(),17));
+    const {latitude:la,longitude:lo,accuracy:a,altitude:al}=pos.coords;
+    setPt(mode,la,lo,a,al);map.setView([la,lo],Math.max(map.getZoom(),17));
     if(accC)map.removeLayer(accC);accC=L.circle([la,lo],{radius:a,color:"#1976d2",weight:1,fillOpacity:.1}).addTo(map);
     toast(`Position trouvée (±${Math.round(a)} m). Ajuste le repère si besoin.`);
   },err=>toast(err.code===1?"Autorise la localisation dans le navigateur":"Position introuvable, réessaie à découvert"),{enableHighAccuracy:true,timeout:20000,maximumAge:0});
 };
-copy.onclick=async()=>{const p=pts[mode];if(!p){toast("Place d'abord le point");return}const [X,Y]=wgsToL93(p.lat,p.lon);
-  try{await navigator.clipboard.writeText(`${X}\t${Y}`);toast("X Y copiés")}catch(e){prompt("Copie :",`${X} ${Y}`)}};
+copy.onclick=async()=>{const p=pts[mode];if(!p){toast("Place d'abord le point");return}const [X,Y]=wgsToL93(p.lat,p.lon);const Z=p.z!=null?Math.round(p.z):"";
+  try{await navigator.clipboard.writeText(`${X}\t${Y}${Z!==""?"\t"+Z:""}`);toast("X Y Z copiés")}catch(e){prompt("Copie :",`${X} ${Y} ${Z}`)}};
 send.onclick=e=>{if(!pts[mode]){e.preventDefault();toast("Place d'abord le point")}};
 if(mode==="tr"){tTr.classList.add("on");tSt.classList.remove("on")}
 show();
