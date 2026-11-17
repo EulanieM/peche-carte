@@ -696,7 +696,7 @@ button,a.btn{font:inherit;border:0;border-radius:10px;min-height:44px;font-weigh
   <div class="tgl"><button id="tSt" class="on">Station</button><button id="tTr">Point de transfert</button></div>
   <div class="xy" id="xy">Touche la carte pour placer le point</div>
   <div class="mute" id="ll">Ou « Me localiser » puis déplace le repère rouge.</div>
-  <div class="row" style="margin-top:6px"><a class="btn pri" id="send" href="#">Envoyer à l'appli</a><button id="copy">Copier X Y Z</button></div>
+  <div class="row" style="margin-top:6px"><a class="btn pri" id="send" href="#">Copier et revenir à l'appli</a><button id="copy">Copier X Y Z</button></div>
 </div>
 <div id="toast"></div>
 <script>/* @preserve
@@ -770,7 +770,15 @@ loc.onclick=()=>{
 };
 copy.onclick=async()=>{const p=pts[mode];if(!p){toast("Place d'abord le point");return}const [X,Y]=wgsToL93(p.lat,p.lon);const Z=p.z!=null?Math.round(p.z):"";
   try{await navigator.clipboard.writeText(`${X}\t${Y}${Z!==""?"\t"+Z:""}`);toast("X Y Z copiés")}catch(e){prompt("Copie :",`${X} ${Y} ${Z}`)}};
-send.onclick=e=>{if(!pts[mode]){e.preventDefault();toast("Place d'abord le point")}};
+/* Envoyer : copie X Y Z puis ouvre l'appli ; il suffit de coller dans une case de position */
+send.onclick=async e=>{e.preventDefault();const p=pts[mode];if(!p){toast("Place d'abord le point");return}
+  if(p.zSrc==="wait"){toast("Altitude en cours de calcul, réessaie dans une seconde");return}
+  const [X,Y]=wgsToL93(p.lat,p.lon);const Z=p.z!=null?Math.round(p.z):"";
+  let ok=true;try{await navigator.clipboard.writeText(`${X}\t${Y}${Z!==""?"\t"+Z:""}`)}catch(err){ok=false}
+  if(!ok){prompt("Copie cette ligne puis colle-la dans l'appli :",`${X} ${Y} ${Z}`)}
+  else toast("Position copiée : dans l'appli, colle dans la case X");
+  setTimeout(()=>{location.href=send.href},ok?900:0);
+};
 if(mode==="tr"){tTr.classList.add("on");tSt.classList.remove("on")}
 show();
 </script>
