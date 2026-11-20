@@ -738,7 +738,8 @@ function show(){
   const Z=p.z!=null?Math.round(p.z):null;
   xy.textContent=`X ${X} · Y ${Y}${Z!=null?` · Alt. ${Z} m`:""}`;
   ll.textContent=`Lambert 93 · lat ${p.lat.toFixed(5)}, lon ${p.lon.toFixed(5)}${p.acc?` · GPS ±${Math.round(p.acc)} m`:""} · altitude : ${p.zSrc==="ign"?"IGN RGE ALTI":p.zSrc==="gps"?"GPS du téléphone (approximative)":p.zSrc==="wait"?"calcul…":"indisponible"}`;
-  send.href=`${APP_URL}#xy-${mode}-${X}-${Y}${Z!=null&&Z>=0?"-"+Z:""}`;
+  if(mode==="st")ll.textContent+=` · commune : ${p.com?p.com:p.comSrc==="wait"?"recherche…":"introuvable"}`;
+  send.href=`${APP_URL}#xy-${mode}-${X}-${Y}${Z!=null&&Z>=0?"-"+Z:""}${mode==="st"&&p.com?"~"+encodeURIComponent(p.com):""}`;
 }
 /* altitude du terrain : service altimétrique IGN (RGE ALTI) ; à défaut, altitude GPS */
 let zReq=0;
@@ -753,7 +754,15 @@ async function fetchAlt(k,gpsAlt){
   }catch(e){if(id!==zReq||pts[k]!==p)return;if(gpsAlt!=null){p.z=gpsAlt;p.zSrc="gps"}else{p.z=null;p.zSrc="none"}}
   try{localStorage.setItem("carteL93",JSON.stringify(pts))}catch(e){}show();
 }
-function setPt(k,lat,lon,acc,gpsAlt){pts[k]={lat,lon,acc:acc||null,z:null,zSrc:"wait"};try{localStorage.setItem("carteL93",JSON.stringify(pts))}catch(e){}show();fetchAlt(k,gpsAlt??null)}
+/* commune du point : API Découpage administratif (geo.api.gouv.fr), à défaut géocodage inverse IGN */
+async function fetchCom(k){
+  const p=pts[k];p.comSrc="wait";show();let c=null;
+  try{const r=await fetch(`https://geo.api.gouv.fr/communes?lat=${p.lat.toFixed(6)}&lon=${p.lon.toFixed(6)}&fields=nom,code&format=json`);if(r.ok){const j=await r.json();if(j&&j[0]&&j[0].nom)c=j[0].nom}}catch(e){}
+  if(!c){try{const r=await fetch(`https://data.geopf.fr/geocodage/reverse?lon=${p.lon.toFixed(6)}&lat=${p.lat.toFixed(6)}&index=address&limit=1`);if(r.ok){const j=await r.json();const f=j&&j.features&&j.features[0];if(f&&f.properties&&f.properties.city)c=f.properties.city}}catch(e){}}
+  if(pts[k]!==p)return;p.com=c?c.normalize("NFD").replace(/[\u0300-\u036f]/g,"").toUpperCase().replace(/[-'’]/g," ").replace(/\s+/g," ").trim():null;p.comSrc=c?"ok":"none";
+  try{localStorage.setItem("carteL93",JSON.stringify(pts))}catch(e){}show();
+}
+function setPt(k,lat,lon,acc,gpsAlt){pts[k]={lat,lon,acc:acc||null,z:null,zSrc:"wait"};try{localStorage.setItem("carteL93",JSON.stringify(pts))}catch(e){}show();fetchAlt(k,gpsAlt??null);if(k==="st")fetchCom(k)}
 map.on("click",e=>setPt(mode,e.latlng.lat,e.latlng.lng));
 tSt.onclick=()=>{mode="st";tSt.classList.add("on");tTr.classList.remove("on");show()};
 tTr.onclick=()=>{mode="tr";tTr.classList.add("on");tSt.classList.remove("on");show()};
@@ -769,12 +778,12 @@ loc.onclick=()=>{
   },err=>toast(err.code===1?"Autorise la localisation dans le navigateur":"Position introuvable, réessaie à découvert"),{enableHighAccuracy:true,timeout:20000,maximumAge:0});
 };
 copy.onclick=async()=>{const p=pts[mode];if(!p){toast("Place d'abord le point");return}const [X,Y]=wgsToL93(p.lat,p.lon);const Z=p.z!=null?Math.round(p.z):"";
-  try{await navigator.clipboard.writeText(`${X}\t${Y}${Z!==""?"\t"+Z:""}`);toast("X Y Z copiés")}catch(e){prompt("Copie :",`${X} ${Y} ${Z}`)}};
+  try{await navigator.clipboard.writeText(`${X}\t${Y}\t${Z}${mode==="st"&&p.com?"\t"+p.com:""}`);toast(mode==="st"&&p.com?"X Y Z et commune copiés":"X Y Z copiés")}catch(e){prompt("Copie :",`${X} ${Y} ${Z}`)}};
 /* Envoyer : copie X Y Z puis ouvre l'appli ; il suffit de coller dans une case de position */
 send.onclick=async e=>{e.preventDefault();const p=pts[mode];if(!p){toast("Place d'abord le point");return}
-  if(p.zSrc==="wait"){toast("Altitude en cours de calcul, réessaie dans une seconde");return}
+  if(p.zSrc==="wait"||(mode==="st"&&p.comSrc==="wait")){toast("Altitude ou commune en cours de calcul, réessaie dans une seconde");return}
   const [X,Y]=wgsToL93(p.lat,p.lon);const Z=p.z!=null?Math.round(p.z):"";
-  let ok=true;try{await navigator.clipboard.writeText(`${X}\t${Y}${Z!==""?"\t"+Z:""}`)}catch(err){ok=false}
+  let ok=true;try{await navigator.clipboard.writeText(`${X}\t${Y}\t${Z}${mode==="st"&&p.com?"\t"+p.com:""}`)}catch(err){ok=false}
   if(!ok){prompt("Copie cette ligne puis colle-la dans l'appli :",`${X} ${Y} ${Z}`)}
   else toast("Envoi à l'appli…");
   setTimeout(()=>{location.href=send.href},ok?900:0);
